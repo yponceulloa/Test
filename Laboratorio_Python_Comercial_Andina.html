@@ -87,6 +87,7 @@ table.t tr.cl{cursor:pointer}
   <div id="who" class="sub"></div>
   <div class="pbar" title="Avance"><i id="pb"></i></div>
   <span id="pt" class="sub"></span>
+  <span id="cloud" class="sub"></span>
   <button class="ghost" id="bRec" style="display:none">Código comprobante</button>
 </header>
 
@@ -207,6 +208,8 @@ const HITOS=DATA.hitos, EXS=DATA.ex;
 const PYBASE="https://cdn.jsdelivr.net/pyodide/v0.27.7/full/";
 const SECRET="andina-uct-icom1104-2026-k7Q2xv";       // cambia este valor antes de publicar
 const DOC_PASS="docente-andina-2026";    // clave del panel docente (cámbiala antes de publicar)
+const SHEET_URL="";   // URL de la aplicación web de Google Apps Script (vacío = sin envío automático)
+const SHEET_TOKEN="cambia-este-token";
 const LSK="lab_py_andina_v1";
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -272,7 +275,7 @@ function viewApp(id){
    <p><button id="bDoc" class="exb">Modo docente</button> <button id="bOut" class="exb">Cambiar estudiante</button></p></nav><main id="main"></main></div>`;
   $('#bDoc').onclick=openDoc;
   $('#bOut').onclick=()=>{if(confirm('Se borrará el avance guardado en este equipo. ¿Continuar?')){S=null;lsSet('');cur=null;viewLogin()}};
-  openEx(id||firstPending());
+  openEx(id||firstPending());syncSoon();
 }
 function firstPending(){const e=EXS.find(e=>hitoOpen(e.hito)&&!(S.ex[e.id]&&S.ex[e.id].ok));return (e||EXS[EXS.length-1]).id}
 function paintNav(){
@@ -357,8 +360,25 @@ async function exec(ex,check){
     }else if(ok)$('#done').innerHTML='<div class="hint" style="border-color:#1b8a5a">✔ Correcto.</div>';
     else if(!r.err)$('#done').innerHTML='';
   }
-  save();
+  save();syncSoon();
 }
+
+
+/* ---------- envío automático a Google Sheets ---------- */
+let syncT=null,syncFail=false,syncing=false;
+function setSync(k){const e=$('#cloud');if(!e)return;e.textContent={ok:'☁ Avance guardado',send:'☁ Enviando…',fail:'⚠ Sin conexión: se reintentará',off:''}[k]||''}
+function syncSoon(){if(!SHEET_URL||!S)return;clearTimeout(syncT);syncT=setTimeout(syncNow,1200)}
+async function syncNow(){
+  if(!SHEET_URL||!S||syncing)return;syncing=true;setSync('send');
+  let att=0,pst=0,blr=0,sec=0,sus=0,ok=0;
+  EXS.forEach(e=>{const r=S.ex[e.id];if(!r)return;if(r.ok)ok++;att+=r.att;pst+=r.pst;blr+=r.blr;sec+=r.sec;if(r.ok&&r.len>r.typ*1.4+15)sus++});
+  const body=JSON.stringify({token:SHEET_TOKEN,name:S.name,email:S.email,hitos:HITOS.filter(h=>hitoOK(h.id)).length,ok,total:EXS.length,att,pst,blr,min:Math.round(sec/60),sus,receipt:await makeReceipt()});
+  const hd={'Content-Type':'text/plain;charset=utf-8'};
+  try{const r=await fetch(SHEET_URL,{method:'POST',headers:hd,body});const j=await r.json();if(!j.ok)throw new Error('rechazado');syncFail=false;setSync('ok')}
+  catch(e){try{await fetch(SHEET_URL,{method:'POST',mode:'no-cors',headers:hd,body});syncFail=false;setSync('ok')}catch(e2){syncFail=true;setSync('fail')}}
+  syncing=false;
+}
+setInterval(()=>{if(syncFail)syncNow()},60000);
 
 /* ---------- foco / tiempo ---------- */
 let lastBlur=0;
